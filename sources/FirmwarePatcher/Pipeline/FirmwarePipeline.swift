@@ -12,6 +12,14 @@
 import Darwin
 import Foundation
 
+@_silgen_name("inject_kext_ffi")
+func inject_kext_ffi(
+    _ kernelcache_path: UnsafePointer<CChar>,
+    _ kext_path: UnsafePointer<CChar>,
+    _ infoplist_path: UnsafePointer<CChar>,
+    _ output_path: UnsafePointer<CChar>
+) -> Int32
+
 /// Orchestrates firmware patching for all boot-chain components.
 ///
 /// The pipeline discovers firmware files inside the VM directory (mirroring
@@ -151,6 +159,31 @@ public final class FirmwarePipeline {
                     for record in records {
                         let range = record.fileOffset ..< record.fileOffset + record.patchedBytes.count
                         currentData.replaceSubrange(range, with: record.patchedBytes)
+                    }
+                }
+            }
+
+            if component.name == "kernelcache" {
+                let env = ProcessInfo.processInfo.environment
+                if let kextPath = env["KEXT_PATH"], let infoPlistPath = env["INFOPLIST_PATH"] {
+                    log("  [+] KEXT_PATH and INFOPLIST_PATH found. Injecting kext via FFI...")
+                    let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("temp_kernelcache")
+                    do {
+                        try currentData.write(to: tempURL)
+                        
+                        log("  [+] Calling inject_kext_ffi with paths...")
+                        let result = inject_kext_ffi(tempURL.path, kextPath, infoPlistPath, tempURL.path)
+                        
+                        if result == 0 {
+                            currentData = try Data(contentsOf: tempURL)
+                            log("  [+] Kext injected successfully via FFI")
+                        } else {
+                            log("  [-] Kext injection FFI failed with status \(result)")
+                        }
+                        
+                        try FileManager.default.removeItem(at: tempURL)
+                    } catch {
+                        log("  [-] Failed during kext injection: \(error)")
                     }
                 }
             }
