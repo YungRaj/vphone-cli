@@ -12,11 +12,12 @@
 import Darwin
 import Foundation
 
-@_silgen_name("inject_kext_ffi")
-func inject_kext_ffi(
+
+
+@_silgen_name("auto_inject_ffi")
+func auto_inject_ffi(
     _ kernelcache_path: UnsafePointer<CChar>,
-    _ kext_path: UnsafePointer<CChar>,
-    _ infoplist_path: UnsafePointer<CChar>,
+    _ bazel_target: UnsafePointer<CChar>,
     _ output_path: UnsafePointer<CChar>
 ) -> Int32
 
@@ -165,25 +166,25 @@ public final class FirmwarePipeline {
 
             if component.name == "kernelcache" {
                 let env = ProcessInfo.processInfo.environment
-                if let kextPath = env["KEXT_PATH"], let infoPlistPath = env["INFOPLIST_PATH"] {
-                    log("  [+] KEXT_PATH and INFOPLIST_PATH found. Injecting kext via FFI...")
+                if let bazelTarget = env["BAZEL_TARGET"] {
+                    log("  [+] BAZEL_TARGET found. Auto-injecting kext via FFI...")
                     let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("temp_kernelcache")
                     do {
                         try currentData.write(to: tempURL)
                         
-                        log("  [+] Calling inject_kext_ffi with paths...")
-                        let result = inject_kext_ffi(tempURL.path, kextPath, infoPlistPath, tempURL.path)
+                        log("  [+] Calling auto_inject_ffi with target...")
+                        let result = auto_inject_ffi(tempURL.path, bazelTarget, tempURL.path)
                         
                         if result == 0 {
                             currentData = try Data(contentsOf: tempURL)
-                            log("  [+] Kext injected successfully via FFI")
+                            log("  [+] Kext auto-injected successfully via FFI")
                         } else {
-                            log("  [-] Kext injection FFI failed with status \(result)")
+                            log("  [-] Kext auto-injection FFI failed with status \(result)")
                         }
                         
                         try FileManager.default.removeItem(at: tempURL)
                     } catch {
-                        log("  [-] Failed during kext injection: \(error)")
+                        log("  [-] Failed during kext auto-injection: \(error)")
                     }
                 }
             }

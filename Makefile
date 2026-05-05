@@ -152,19 +152,23 @@ clean:
 # Build
 # ═══════════════════════════════════════════════════════════════════
 
-.PHONY: build patcher_build bundle
+.PHONY: build patcher_build bundle kernelcache_injector
 
 build: $(BINARY)
 
 patcher_build: $(PATCHER_BINARY)
 
-$(PATCHER_BINARY): $(SWIFT_SOURCES) Package.swift
+kernelcache_injector:
+	@echo "=== Building kernelcache_injector ==="
+	@cd $(CURDIR)/../.. && cargo build -p kernelcache_injector
+
+$(PATCHER_BINARY): $(SWIFT_SOURCES) Package.swift kernelcache_injector
 	@echo "=== Building vphone-cli patcher ($(GIT_HASH)) ==="
 	@echo '// Auto-generated — do not edit' > $(BUILD_INFO)
 	@echo 'enum VPhoneBuildInfo { static let commitHash = "$(GIT_HASH)" }' >> $(BUILD_INFO)
 	@set -o pipefail; swift build -Xlinker -L$(CURDIR)/../../target/debug -Xlinker -lkernelcache_injector 2>&1 | tail -5
 
-$(BINARY): $(SWIFT_SOURCES) Package.swift $(ENTITLEMENTS)
+$(BINARY): $(SWIFT_SOURCES) Package.swift $(ENTITLEMENTS) kernelcache_injector
 	@echo "=== Building vphone-cli ($(GIT_HASH)) ==="
 	@echo '// Auto-generated — do not edit' > $(BUILD_INFO)
 	@echo 'enum VPhoneBuildInfo { static let commitHash = "$(GIT_HASH)" }' >> $(BUILD_INFO)
