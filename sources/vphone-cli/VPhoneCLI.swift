@@ -237,7 +237,20 @@ struct PatchComponentCLI: ParsableCommand {
         case .kernelBase:
             let patcher = KernelPatcher(data: payload, verbose: !quiet)
             count = try patcher.apply()
-            patchedData = patcher.buffer.data
+            var currentData = patcher.buffer.data
+            
+            let env = ProcessInfo.processInfo.environment
+            if let bazelTarget = env["BAZEL_TARGET"] {
+                if !quiet { print("  [+] BAZEL_TARGET found. Auto-injecting kext via FFI...") }
+                let (injectedData, result) = autoInjectKext(data: currentData, bazelTarget: bazelTarget)
+                if let injectedData {
+                    currentData = injectedData
+                    if !quiet { print("  [+] Kext auto-injected successfully via FFI") }
+                } else {
+                    if !quiet { print("  [-] Kext auto-injection FFI failed with status \(result)") }
+                }
+            }
+            patchedData = currentData
         }
 
         let outputDir = output.deletingLastPathComponent()

@@ -166,6 +166,7 @@ $(PATCHER_BINARY): $(SWIFT_SOURCES) Package.swift kernelcache_injector
 	@echo "=== Building vphone-cli patcher ($(GIT_HASH)) ==="
 	@echo '// Auto-generated — do not edit' > $(BUILD_INFO)
 	@echo 'enum VPhoneBuildInfo { static let commitHash = "$(GIT_HASH)" }' >> $(BUILD_INFO)
+	@touch sources/vphone-cli/VPhoneCLI.swift
 	@set -o pipefail; swift build -Xlinker -L$(CURDIR)/../../target/debug -Xlinker -lkernelcache_injector 2>&1 | tail -5
 
 $(BINARY): $(SWIFT_SOURCES) Package.swift $(ENTITLEMENTS) kernelcache_injector

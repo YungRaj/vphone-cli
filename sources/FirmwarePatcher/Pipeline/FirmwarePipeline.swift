@@ -21,6 +21,25 @@ func auto_inject_ffi(
     _ output_path: UnsafePointer<CChar>
 ) -> Int32
 
+public func autoInjectKext(data: Data, bazelTarget: String) -> (Data?, Int32) {
+    let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("temp_kernelcache_\(UUID().uuidString)")
+    do {
+        try data.write(to: tempURL)
+        let result = auto_inject_ffi(tempURL.path, bazelTarget, tempURL.path)
+        if result == 0 {
+            let newData = try Data(contentsOf: tempURL)
+            print("[DEBUG] newData.count == data.count? \(newData.count == data.count)")
+            print("[DEBUG] newData == data? \(newData == data)")
+            try FileManager.default.removeItem(at: tempURL)
+            return (newData, 0)
+        }
+        try? FileManager.default.removeItem(at: tempURL)
+        return (nil, result)
+    } catch {
+        return (nil, -99)
+    }
+}
+
 /// Orchestrates firmware patching for all boot-chain components.
 ///
 /// The pipeline discovers firmware files inside the VM directory (mirroring
@@ -168,23 +187,12 @@ public final class FirmwarePipeline {
                 let env = ProcessInfo.processInfo.environment
                 if let bazelTarget = env["BAZEL_TARGET"] {
                     log("  [+] BAZEL_TARGET found. Auto-injecting kext via FFI...")
-                    let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("temp_kernelcache")
-                    do {
-                        try currentData.write(to: tempURL)
-                        
-                        log("  [+] Calling auto_inject_ffi with target...")
-                        let result = auto_inject_ffi(tempURL.path, bazelTarget, tempURL.path)
-                        
-                        if result == 0 {
-                            currentData = try Data(contentsOf: tempURL)
-                            log("  [+] Kext auto-injected successfully via FFI")
-                        } else {
-                            log("  [-] Kext auto-injection FFI failed with status \(result)")
-                        }
-                        
-                        try FileManager.default.removeItem(at: tempURL)
-                    } catch {
-                        log("  [-] Failed during kext auto-injection: \(error)")
+                    let (injectedData, result) = autoInjectKext(data: currentData, bazelTarget: bazelTarget)
+                    if let injectedData {
+                        currentData = injectedData
+                        log("  [+] Kext auto-injected successfully via FFI")
+                    } else {
+                        log("  [-] Kext auto-injection FFI failed with status \(result)")
                     }
                 }
             }
