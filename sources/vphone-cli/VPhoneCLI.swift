@@ -53,12 +53,15 @@ struct VPhoneBootCLI: ParsableCommand {
     )
     var installIPA: URL?
     
+    @Flag(name: .customLong("no-graphics"), help: "Run in headless mode without GUI.")
+    var noGraphicsFlag: Bool = false
+
     @Flag(name: .customLong("no-vphoned"), help: "Exclude vphoned usage (patchless-only).")
     var noVphoned: Bool = false
 
     /// DFU mode runs headless (no GUI).
     var noGraphics: Bool {
-        dfu
+        dfu || noGraphicsFlag
     }
 
     var installPackageURL: URL? {

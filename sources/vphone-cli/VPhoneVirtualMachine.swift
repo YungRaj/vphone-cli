@@ -290,12 +290,23 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         super.init()
         virtualMachine.delegate = self
 
-        // Forward VM serial output -> host stdout
+        // Forward VM serial output -> host stdout AND serial.log
         if let readHandle = serialOutputReadHandle {
             readHandle.readabilityHandler = { handle in
                 let data = handle.availableData
                 if data.isEmpty { return }
                 FileHandle.standardOutput.write(data)
+                if let f = FileHandle(forWritingAtPath: "serial.log") {
+                    if #available(macOS 10.15.4, *) {
+                        try? f.seekToEnd()
+                    } else {
+                        f.seekToEndOfFile()
+                    }
+                    f.write(data)
+                    f.closeFile()
+                } else {
+                    try? data.write(to: URL(fileURLWithPath: "serial.log"))
+                }
             }
         }
     }
@@ -379,6 +390,9 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
 
     nonisolated func virtualMachine(_: VZVirtualMachine, didStopWithError error: Error) {
         print("[vphone] Stopped with error: \(error)")
+        // Give time for readability handlers to flush the last bits of the serial log
+        fflush(stdout)
+        Thread.sleep(forTimeInterval: 1.0)
         exit(EXIT_FAILURE)
     }
 

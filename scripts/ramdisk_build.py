@@ -153,7 +153,8 @@ def sign_img4(im4p_path, img4_path, im4m_path, tag=None):
 
 def run(cmd, **kwargs):
     """Run a command, raising on failure."""
-    return subprocess.run(cmd, check=True, **kwargs)
+    kwargs.setdefault('check', True)
+    return subprocess.run(cmd, **kwargs)
 
 
 def run_sudo(cmd, **kwargs):
@@ -493,7 +494,7 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
     try:
         # Mount, create expanded copy
         print("  Mounting base ramdisk...")
-        run_sudo(
+        run(
             [
                 "hdiutil",
                 "attach",
@@ -506,8 +507,8 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
             ]
         )
 
-        print("  Creating expanded ramdisk (254 MB)...")
-        run_sudo(
+        print("  Creating expanded ramdisk (from source folder)...")
+        run(
             [
                 "hdiutil",
                 "create",
@@ -516,23 +517,23 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
                 "-imagekey",
                 "diskimage-class=CRawDiskImage",
                 "-format",
-                "UDZO",
+                "UDRW",
                 "-fs",
                 "APFS",
                 "-layout",
                 "NONE",
                 "-srcfolder",
                 mountpoint,
-                "-copyuid",
-                "root",
+                "-anyowners",
                 ramdisk_custom,
             ]
         )
-        run_sudo(["hdiutil", "detach", "-force", mountpoint])
+        
+        run(["hdiutil", "detach", "-force", mountpoint])
 
         # Mount expanded, inject SSH
         print("  Mounting expanded ramdisk...")
-        run_sudo(
+        run(
             [
                 "hdiutil",
                 "attach",
@@ -547,10 +548,44 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
 
         print("  Injecting SSH tools...")
         ssh_tar = os.path.join(input_dir, "ssh.tar.gz")
-        run_sudo(
-            [gtar_bin, "-x", "--no-overwrite-dir", "-f", ssh_tar, "-C", mountpoint]
+        run(
+            [
+                gtar_bin,
+                "-x",
+                "--no-overwrite-dir",
+                "--no-same-owner",
+                "--no-same-permissions",
+                "-f",
+                ssh_tar,
+                "-C",
+                mountpoint,
+            ]
         )
         patch_restored_external_usbmux_label(mountpoint)
+
+        # Build and copy darwinkit_user_tool to the ramdisk
+        print("  Building darwinkit_user_tool for iOS...")
+        darwinkit_root = os.path.abspath(os.path.join(_SCRIPT_DIR, "../../.."))
+        user_cargo_toml = os.path.join(darwinkit_root, "ios/user/Cargo.toml")
+        run(
+            [
+                "cargo",
+                "build",
+                "--manifest-path",
+                user_cargo_toml,
+                "--target",
+                "aarch64-apple-ios",
+                "--release",
+            ]
+        )
+        user_tool_src = os.path.join(
+            darwinkit_root,
+            "ios/user/target/aarch64-apple-ios/release/darwinkit_user_tool",
+        )
+        user_tool_dst = os.path.join(mountpoint, "usr/local/bin/darwinkit_user_tool")
+        print(f"  Copying {user_tool_src} to {user_tool_dst}...")
+        os.makedirs(os.path.dirname(user_tool_dst), exist_ok=True)
+        shutil.copy2(user_tool_src, user_tool_dst)
 
         # Remove unnecessary files
         for rel_path in RAMDISK_REMOVE:
@@ -602,10 +637,10 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
         print(f"  [+] trustcache.img4")
 
     finally:
-        run_sudo(["hdiutil", "detach", "-force", mountpoint], capture_output=True)
+        run(["hdiutil", "detach", "-force", mountpoint], capture_output=True, check=False)
 
     # Shrink and sign ramdisk
-    run_sudo(["hdiutil", "resize", "-sectors", "min", ramdisk_custom])
+    run(["hdiutil", "resize", "-sectors", "min", ramdisk_custom])
 
     print("  Signing ramdisk...")
     rd_im4p = os.path.join(temp_dir, "ramdisk.im4p")
@@ -636,7 +671,7 @@ def main():
     # Find SHSH
     shsh_path = find_shsh(vm_dir)
     if not shsh_path:
-        print(f"[-] No SHSH blob found in {shsh_dir}/")
+        print(f"[-] No SHSH blob found in {vm_dir}/")
         print("    Place your .shsh file in the shsh/ directory.")
         sys.exit(1)
 

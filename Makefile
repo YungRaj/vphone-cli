@@ -160,7 +160,7 @@ patcher_build: $(PATCHER_BINARY)
 
 kernelcache_injector:
 	@echo "=== Building kernelcache_injector ==="
-	@cd $(CURDIR)/../.. && cargo build -p kernelcache_injector
+	@cd $(CURDIR)/../.. && cargo build --manifest-path ios/kernelcache_injector/Cargo.toml --target-dir target
 
 $(PATCHER_BINARY): $(SWIFT_SOURCES) Package.swift kernelcache_injector
 	@echo "=== Building vphone-cli patcher ($(GIT_HASH)) ==="

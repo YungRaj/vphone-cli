@@ -12,7 +12,7 @@ import Foundation
 ///      tbz w0, #0, <target> / mov w0, #0 / bl pattern, convert tbz → b <target>
 public final class IBootJBPatcher: IBootPatcher {
     override public func findAll() throws -> [PatchRecord] {
-        patches = []
+        patches = try super.findAll()
         if mode == .ibss {
             patchSkipGenerateNonce()
         }
