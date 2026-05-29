@@ -44,6 +44,7 @@ def inject_daemons(plist_path, daemon_dir):
     with open(plist_path, "rb") as f:
         target = plistlib.load(f)
 
+    # Inject our own daemons
     for name in ("bash", "dropbear", "trollvnc", "vphoned", "rpcserver_ios"):
         src = os.path.join(daemon_dir, f"{name}.plist")
         if not os.path.exists(src):
@@ -56,6 +57,18 @@ def inject_daemons(plist_path, daemon_dir):
         key = f"/System/Library/LaunchDaemons/{name}.plist"
         target.setdefault("LaunchDaemons", {})[key] = daemon
         print(f"  [+] Injected {name}")
+
+    # Strip fairplayd and fairplaydeviceidentityd daemons to prevent page faults/hangs
+    daemons_dict = target.get("LaunchDaemons", {})
+    keys_to_remove = []
+    for key in daemons_dict.keys():
+        key_lower = key.lower()
+        if "fairplayd" in key_lower or "fairplaydeviceidentityd" in key_lower:
+            keys_to_remove.append(key)
+
+    for key in keys_to_remove:
+        del daemons_dict[key]
+        print(f"  [-] Disabled LaunchDaemon: {key}")
 
     with open(plist_path, "wb") as f:
         plistlib.dump(target, f, sort_keys=False)
