@@ -499,6 +499,26 @@ done
 scp_to "$VPHONED_SRC/vphoned.plist" "/mnt1/System/Library/LaunchDaemons/"
 ssh_cmd "/bin/chmod 0644 /mnt1/System/Library/LaunchDaemons/vphoned.plist"
 
+# Build, sign and install darwinkit_user_tool to the restore rootfs
+echo "  Building darwinkit_user_tool for iOS..."
+DARWINKIT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
+cargo build \
+    --manifest-path "$DARWINKIT_ROOT/ios/user/Cargo.toml" \
+    --target aarch64-apple-ios \
+    --release
+
+USER_TOOL_SRC="$DARWINKIT_ROOT/ios/user/target/aarch64-apple-ios/release/darwinkit_user_tool"
+USER_TOOL_SIGNED="$TEMP_DIR/darwinkit_user_tool"
+cp "$USER_TOOL_SRC" "$USER_TOOL_SIGNED"
+
+echo "  Signing darwinkit_user_tool..."
+ldid_sign "$USER_TOOL_SIGNED"
+
+ssh_cmd "/bin/mkdir -p /mnt1/usr/local/bin"
+scp_to "$USER_TOOL_SIGNED" "/mnt1/usr/local/bin/darwinkit_user_tool"
+ssh_cmd "/bin/chmod 0755 /mnt1/usr/local/bin/darwinkit_user_tool"
+echo "  [+] darwinkit_user_tool installed"
+
 # Always patch launchd.plist from .bak (original)
 echo "  Patching launchd.plist..."
 if ! remote_file_exists "/mnt1/System/Library/xpc/launchd.plist.bak"; then
@@ -527,6 +547,7 @@ rm -f "$TEMP_DIR/seputil" \
     "$TEMP_DIR/launchd_cache_loader" \
     "$TEMP_DIR/mobileactivationd" \
     "$TEMP_DIR/vphoned" \
+    "$TEMP_DIR/darwinkit_user_tool" \
     "$TEMP_DIR/launchd.plist"
 
 echo ""
