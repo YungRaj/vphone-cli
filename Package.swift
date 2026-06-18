@@ -23,7 +23,10 @@ let package = Package(
                 .product(name: "Img4tool", package: "libimg4-spm"),
                 .product(name: "MachOKit", package: "MachOKit"),
             ],
-            path: "sources/FirmwarePatcher"
+            path: "sources/FirmwarePatcher",
+            linkerSettings: [
+                .unsafeFlags(["-L../../target/debug", "-lkernelcache_injector"])
+            ]
         ),
         .executableTarget(
             name: "vphone-cli",
