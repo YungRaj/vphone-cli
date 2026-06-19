@@ -25,7 +25,7 @@ let package = Package(
             ],
             path: "sources/FirmwarePatcher",
             linkerSettings: [
-                .unsafeFlags(["-L../../target/debug", "-lkernelcache_injector"])
+                .unsafeFlags(["-L../../target/debug", "-lkc_patcher"])
             ]
         ),
         .executableTarget(

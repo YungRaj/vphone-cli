@@ -152,28 +152,28 @@ clean:
 # Build
 # ═══════════════════════════════════════════════════════════════════
 
-.PHONY: build patcher_build bundle kernelcache_injector
+.PHONY: build patcher_build bundle kc_patcher
 
 build: $(BINARY)
 
 patcher_build: $(PATCHER_BINARY)
 
-kernelcache_injector:
-	@echo "=== Building kernelcache_injector ==="
-	@cd $(CURDIR)/../.. && cargo build --manifest-path ios/kernelcache_injector/Cargo.toml --target-dir target
+kc_patcher:
+	@echo "=== Building kc_patcher ==="
+	@cd $(CURDIR)/../.. && cargo build --manifest-path core/kc_patcher/Cargo.toml --target-dir target
 
-$(PATCHER_BINARY): $(SWIFT_SOURCES) Package.swift kernelcache_injector
+$(PATCHER_BINARY): $(SWIFT_SOURCES) Package.swift kc_patcher
 	@echo "=== Building vphone-cli patcher ($(GIT_HASH)) ==="
 	@echo '// Auto-generated — do not edit' > $(BUILD_INFO)
 	@echo 'enum VPhoneBuildInfo { static let commitHash = "$(GIT_HASH)" }' >> $(BUILD_INFO)
 	@touch sources/vphone-cli/VPhoneCLI.swift
-	@set -o pipefail; swift build -Xlinker -L$(CURDIR)/../../target/debug -Xlinker -lkernelcache_injector 2>&1 | tail -5
+	@set -o pipefail; swift build -Xlinker -L$(CURDIR)/../../target/debug -Xlinker -lkc_patcher 2>&1 | tail -5
 
-$(BINARY): $(SWIFT_SOURCES) Package.swift $(ENTITLEMENTS) kernelcache_injector
+$(BINARY): $(SWIFT_SOURCES) Package.swift $(ENTITLEMENTS) kc_patcher
 	@echo "=== Building vphone-cli ($(GIT_HASH)) ==="
 	@echo '// Auto-generated — do not edit' > $(BUILD_INFO)
 	@echo 'enum VPhoneBuildInfo { static let commitHash = "$(GIT_HASH)" }' >> $(BUILD_INFO)
-	@set -o pipefail; swift build -c release -Xlinker -L$(CURDIR)/../../target/debug -Xlinker -lkernelcache_injector 2>&1 | tail -5
+	@set -o pipefail; swift build -c release -Xlinker -L$(CURDIR)/../../target/debug -Xlinker -lkc_patcher 2>&1 | tail -5
 	@echo ""
 	@echo "=== Signing with entitlements ==="
 	codesign --force --sign - --entitlements $(ENTITLEMENTS) $@
