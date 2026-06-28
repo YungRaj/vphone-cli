@@ -310,6 +310,18 @@ class VPhoneControl {
         return DevModeStatus(enabled: enabled)
     }
 
+    struct DevModeEnableResult {
+        let alreadyEnabled: Bool
+        let message: String
+    }
+
+    func sendDevModeEnable() async throws -> DevModeEnableResult {
+        let (resp, _) = try await sendRequest(["t": "devmode", "action": "enable"])
+        let alreadyEnabled = resp["already_enabled"] as? Bool ?? false
+        let msg = resp["msg"] as? String ?? ""
+        return DevModeEnableResult(alreadyEnabled: alreadyEnabled, message: msg)
+    }
+
     func sendPing() async throws {
         _ = try await sendRequest(["t": "ping"])
     }

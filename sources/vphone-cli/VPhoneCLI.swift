@@ -198,6 +198,7 @@ struct PatchFirmwareCLI: ParsableCommand {
 struct PatchComponentCLI: ParsableCommand {
     enum ComponentOption: String, CaseIterable, ExpressibleByArgument {
         case txm
+        case txmDev = "txm-dev"
         case kernelBase = "kernel-base"
     }
 
@@ -234,6 +235,11 @@ struct PatchComponentCLI: ParsableCommand {
         switch component {
         case .txm:
             let patcher = TXMPatcher(data: payload, verbose: !quiet)
+            count = try patcher.apply()
+            patchedData = patcher.patchedData
+
+        case .txmDev:
+            let patcher = TXMDevPatcher(data: payload, verbose: !quiet)
             count = try patcher.apply()
             patchedData = patcher.patchedData
 

@@ -1078,7 +1078,7 @@ main() {
     start_boot_dfu
     load_device_identity
     wait_for_recovery
-    run_make "Ramdisk" ramdisk_build RAMDISK_UDID="$DEVICE_UDID"
+    run_make "Ramdisk" ramdisk_build RAMDISK_UDID="$DEVICE_UDID" JB="$JB_MODE" DEV="$DEV_MODE"
     echo "[*] Ramdisk identity context: restore_udid=${DEVICE_UDID} ecid=0x${DEVICE_ECID}"
     run_make "Ramdisk" ramdisk_send IRECOVERY_ECID="0x$DEVICE_ECID" RAMDISK_UDID="$DEVICE_UDID"
     start_iproxy

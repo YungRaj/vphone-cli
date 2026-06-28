@@ -107,7 +107,10 @@ def wait_for_irecv(ecid: Optional[int], timeout: int, is_recovery: Optional[bool
 
 def irecv_send_file(irecv: IRecv, image_path: Path) -> None:
     data = image_path.read_bytes()
-    irecv.send_buffer(data)
+    try:
+        irecv.send_buffer(data)
+    except Exception as e:
+        print(f"  [!] Warning sending {image_path.name}: {e} (continuing anyway)")
 
 
 def resolve_kernel_image(ramdisk_dir: Path) -> Path:

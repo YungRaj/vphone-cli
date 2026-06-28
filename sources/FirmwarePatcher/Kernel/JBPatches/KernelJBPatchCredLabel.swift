@@ -23,7 +23,7 @@ extension KernelJBPatcher {
     private static let movW0_0_u32: UInt32 = 0x5280_0000
     private static let movW0_1_u32: UInt32 = 0x5280_0020
     private static let relaxCSMask: UInt32 = 0xFFFF_C0FF
-    private static let relaxSetMask: UInt32 = 0x0000_000C
+    private static let relaxSetMask: UInt32 = 0x0400_000C  // CS_PLATFORM_BINARY | CS_GET_TASK_ALLOW | CS_INSTALLER
 
     // MARK: - Entry Point
 
@@ -83,8 +83,8 @@ extension KernelJBPatcher {
             }
         }
 
-        // Success cave: 8 instructions = 32 bytes
-        guard let successCaveOff = findCodeCave(size: 32),
+        // Success cave: 9 instructions = 36 bytes
+        guard let successCaveOff = findCodeCave(size: 36),
               successCaveOff != denyCaveOff
         else {
             log("  [-] no code cave for C21-v3 success trampoline")
@@ -117,32 +117,34 @@ extension KernelJBPatcher {
                  description: "b deny cave [_cred_label_update_execve C21-v3 exit @ 0x\(String(format: "%X", dOff))]")
         }
 
-        // 8. Build success shellcode (8 instrs = 32 bytes):
+        // 8. Build success shellcode (9 instrs = 36 bytes):
         //   ldr x26, [x29, #imm]      (reload csflags ptr from stack)
-        //   cbz x26, #0x10             (skip if null)
+        //   cbz x26, #0x14             (skip if null — skip 5 insns to mov w0,#0)
         //   ldr w8, [x26]
         //   and w8, w8, #relaxCSMask
-        //   orr w8, w8, #relaxSetMask
+        //   orr w8, w8, #0xC           (CS_GET_TASK_ALLOW | CS_INSTALLER)
+        //   orr w8, w8, #0x04000000    (CS_PLATFORM_BINARY)
         //   str w8, [x26]
         //   mov w0, #0
         //   b epilogue
-        guard let successBranchBack = encodeB(from: successCaveOff + 28, to: epilogueOff) else {
+        guard let successBranchBack = encodeB(from: successCaveOff + 32, to: epilogueOff) else {
             log("  [-] success trampoline → epilogue branch out of range")
             return
         }
 
         var successShellcode = Data()
         successShellcode += csflagsInsn // ldr x26, [x29, #imm]
-        successShellcode += encodeCBZ_X26_skip16() // cbz x26, #0x10 (skip 4 insns)
+        successShellcode += encodeCBZ_X26_skip20() // cbz x26, #0x14 (skip 5 insns)
         successShellcode += encodeLDR_W8_X26() // ldr w8, [x26]
         successShellcode += encodeAND_W8_W8_mask(Self.relaxCSMask) // and w8, w8, #0xFFFFC0FF
-        successShellcode += encodeORR_W8_W8_imm(Self.relaxSetMask) // orr w8, w8, #0xC
+        successShellcode += encodeORR_W8_W8_imm(0x0000_000C) // orr w8, w8, #0xC
+        successShellcode += encodeORR_W8_W8_platformBinary() // orr w8, w8, #0x04000000
         successShellcode += encodeSTR_W8_X26() // str w8, [x26]
         successShellcode += ARM64.movW0_0 // mov w0, #0
         successShellcode += successBranchBack // b epilogue
 
-        guard successShellcode.count == 32 else {
-            log("  [-] success shellcode size mismatch: \(successShellcode.count) != 32")
+        guard successShellcode.count == 36 else {
+            log("  [-] success shellcode size mismatch: \(successShellcode.count) != 36")
             return
         }
 
@@ -283,17 +285,6 @@ extension KernelJBPatcher {
 
     // MARK: - Instruction Encoders
 
-    /// CBZ X26, #0x10  — skip 4 instructions if x26 == 0
-    private func encodeCBZ_X26_skip16() -> Data {
-        // CBZ encoding: [31]=1 (64-bit), [30:24]=0110100, [23:5]=imm19, [4:0]=Rt
-        // imm19 = offset/4 = 16/4 = 4  → bits [23:5] = 4 << 5 = 0x80
-        // Full: 1_0110100_000000000000000000100_11010 = ?
-        // CBZ X26 = 0xB400_0000 | (imm19 << 5) | 26
-        // imm19 = 4, Rt = 26 (x26)
-        let imm19: UInt32 = 4
-        let insn: UInt32 = 0xB400_0000 | (imm19 << 5) | 26
-        return ARM64.encodeU32(insn)
-    }
 
     /// LDR W8, [X26]
     private func encodeLDR_W8_X26() -> Data {
@@ -343,6 +334,24 @@ extension KernelJBPatcher {
         // 0xC = bit 2 and bit 3 set
         // Python result: asm("orr w8, w8, #0xC") → 0x321e0508
         let insn: UInt32 = 0x321E_0508
+        return ARM64.encodeU32(insn)
+    }
+
+    /// ORR W8, W8, #0x04000000 (CS_PLATFORM_BINARY)
+    private func encodeORR_W8_W8_platformBinary() -> Data {
+        // ORR W8, W8, #0x04000000
+        // Single bit at position 26: N=0, immr=6, imms=0
+        // Encoding: 0_01_100100_0_000110_000000_01000_01000 = 0x32060108
+        let insn: UInt32 = 0x3206_0108
+        return ARM64.encodeU32(insn)
+    }
+
+    /// CBZ X26, #0x14  — skip 5 instructions if x26 == 0
+    private func encodeCBZ_X26_skip20() -> Data {
+        // CBZ X26 = 0xB400_0000 | (imm19 << 5) | 26
+        // imm19 = offset/4 = 20/4 = 5
+        let imm19: UInt32 = 5
+        let insn: UInt32 = 0xB400_0000 | (imm19 << 5) | 26
         return ARM64.encodeU32(insn)
     }
 }

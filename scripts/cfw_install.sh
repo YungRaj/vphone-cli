@@ -154,7 +154,7 @@ ldid_sign() {
 safe_detach() {
     local mnt="$1"
     if mount | grep -Fq " on $mnt "; then
-        sudo hdiutil detach -force "$mnt" 2>/dev/null || true
+        hdiutil detach -force "$mnt" 2>/dev/null || true
     fi
 }
 
@@ -287,7 +287,7 @@ fi
 CRYPTEX_OS_COUNT=$(ssh_cmd "/bin/ls /mnt1/System/Cryptexes/OS/ 2>/dev/null | /usr/bin/wc -l" | tr -d ' ')
 CRYPTEX_APP_COUNT=$(ssh_cmd "/bin/ls /mnt1/System/Cryptexes/App/ 2>/dev/null | /usr/bin/wc -l" | tr -d ' ')
 
-if [[ "${CRYPTEX_OS_COUNT:-0}" -gt 0 && "${CRYPTEX_APP_COUNT:-0}" -gt 0 ]]; then
+if false; then
     echo "  [*] Cryptexes already installed on device (OS=${CRYPTEX_OS_COUNT} entries, App=${CRYPTEX_APP_COUNT} entries), skipping"
 
     # Still ensure dyld symlinks exist
@@ -329,9 +329,9 @@ else
     assert_mount_under_vm "$MNT_APPOS" "AppOS mountpoint"
 
     echo "  Mounting SystemOS..."
-    sudo hdiutil attach -mountpoint "$MNT_SYSOS" "$SYSOS_DMG" -nobrowse -owners off
+    hdiutil attach -mountpoint "$MNT_SYSOS" "$SYSOS_DMG" -nobrowse -owners off
     echo "  Mounting AppOS..."
-    sudo hdiutil attach -mountpoint "$MNT_APPOS" "$APPOS_DMG" -nobrowse -owners off
+    hdiutil attach -mountpoint "$MNT_APPOS" "$APPOS_DMG" -nobrowse -owners off
 
     ssh_cmd "/bin/rm -rf /mnt1/System/Cryptexes/App /mnt1/System/Cryptexes/OS"
     ssh_cmd "/bin/mkdir -p /mnt1/System/Cryptexes/App /mnt1/System/Cryptexes/OS"
@@ -502,7 +502,7 @@ ssh_cmd "/bin/chmod 0644 /mnt1/System/Library/LaunchDaemons/vphoned.plist"
 # Build, sign and install darwinkit_user_tool to the restore rootfs
 echo "  Building darwinkit_user_tool for iOS..."
 DARWINKIT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
-cargo build \
+BINDGEN_EXTRA_CLANG_ARGS="-isysroot $(xcrun --sdk iphoneos --show-sdk-path)" cargo build \
     --manifest-path "$DARWINKIT_ROOT/ios/user/Cargo.toml" \
     --target aarch64-apple-ios \
     --release
@@ -512,12 +512,42 @@ USER_TOOL_SIGNED="$TEMP_DIR/darwinkit_user_tool"
 cp "$USER_TOOL_SRC" "$USER_TOOL_SIGNED"
 
 echo "  Signing darwinkit_user_tool..."
-ldid_sign "$USER_TOOL_SIGNED"
+USER_TOOL_ENTS="$SCRIPT_DIR/../vm/ramdisk_input/darwinkit_user_tool_ents.plist"
+if [[ -f "$USER_TOOL_ENTS" ]]; then
+    ldid -S"$USER_TOOL_ENTS" -M "-K$VM_DIR/$CFW_INPUT/signcert.p12" "$USER_TOOL_SIGNED"
+else
+    ldid_sign "$USER_TOOL_SIGNED"
+fi
 
 ssh_cmd "/bin/mkdir -p /mnt1/usr/local/bin"
 scp_to "$USER_TOOL_SIGNED" "/mnt1/usr/local/bin/darwinkit_user_tool"
 ssh_cmd "/bin/chmod 0755 /mnt1/usr/local/bin/darwinkit_user_tool"
 echo "  [+] darwinkit_user_tool installed"
+
+# Build, sign and install darwinkit_kernel_fuzzer to the restore rootfs
+echo "  Building darwinkit_kernel_fuzzer for iOS..."
+cargo build \
+    --manifest-path "$DARWINKIT_ROOT/ios/user/Cargo.toml" \
+    --target aarch64-apple-ios \
+    --release \
+    --no-default-features \
+    --bin darwinkit_kernel_fuzzer
+
+KFUZZ_SRC="$DARWINKIT_ROOT/ios/user/target/aarch64-apple-ios/release/darwinkit_kernel_fuzzer"
+KFUZZ_SIGNED="$TEMP_DIR/darwinkit_kernel_fuzzer"
+cp "$KFUZZ_SRC" "$KFUZZ_SIGNED"
+
+echo "  Signing darwinkit_kernel_fuzzer..."
+KFUZZ_ENTS="$SCRIPT_DIR/../vm/ramdisk_input/darwinkit_kernel_fuzzer_ents.plist"
+if [[ -f "$KFUZZ_ENTS" ]]; then
+    ldid -S"$KFUZZ_ENTS" -M "-K$VM_DIR/$CFW_INPUT/signcert.p12" "$KFUZZ_SIGNED"
+else
+    ldid_sign "$KFUZZ_SIGNED"
+fi
+
+scp_to "$KFUZZ_SIGNED" "/mnt1/usr/local/bin/darwinkit_kernel_fuzzer"
+ssh_cmd "/bin/chmod 0755 /mnt1/usr/local/bin/darwinkit_kernel_fuzzer"
+echo "  [+] darwinkit_kernel_fuzzer installed"
 
 # Always patch launchd.plist from .bak (original)
 echo "  Patching launchd.plist..."
@@ -548,6 +578,7 @@ rm -f "$TEMP_DIR/seputil" \
     "$TEMP_DIR/mobileactivationd" \
     "$TEMP_DIR/vphoned" \
     "$TEMP_DIR/darwinkit_user_tool" \
+    "$TEMP_DIR/darwinkit_kernel_fuzzer" \
     "$TEMP_DIR/launchd.plist"
 
 echo ""

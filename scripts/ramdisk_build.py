@@ -61,6 +61,13 @@ RAMDISK_REMOVE = [
     "usr/sbin/dietappleh16camerad",
     "usr/local/bin/wget",
     "usr/local/bin/procexp",
+    "usr/standalone/firmware/S6TUUP1",
+    "usr/standalone/firmware/DP875",
+    "usr/standalone/firmware/S3E",
+    "usr/standalone/firmware/t302",
+    "usr/standalone/firmware/SLAM",
+    "usr/standalone/firmware/DP865",
+    "usr/standalone/firmware/S4E",
 ]
 
 # Directories to re-sign in ramdisk
@@ -513,13 +520,13 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
                 "hdiutil",
                 "create",
                 "-size",
-                "254m",
+                "210m",
                 "-imagekey",
                 "diskimage-class=CRawDiskImage",
                 "-format",
                 "UDRW",
                 "-fs",
-                "APFS",
+                "Case-sensitive APFS",
                 "-layout",
                 "NONE",
                 "-srcfolder",
@@ -546,6 +553,16 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
             ]
         )
 
+        # Remove unnecessary files to free up space first
+        print("  Cleaning up unnecessary files...")
+        for rel_path in RAMDISK_REMOVE:
+            full = os.path.join(mountpoint, rel_path)
+            if os.path.exists(full):
+                if os.path.isdir(full) and not os.path.islink(full):
+                    shutil.rmtree(full)
+                else:
+                    os.remove(full)
+
         print("  Injecting SSH tools...")
         ssh_tar = os.path.join(input_dir, "ssh.tar.gz")
         run(
@@ -567,6 +584,18 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
         print("  Building darwinkit_user_tool for iOS...")
         darwinkit_root = os.path.abspath(os.path.join(_SCRIPT_DIR, "../../.."))
         user_cargo_toml = os.path.join(darwinkit_root, "ios/user/Cargo.toml")
+
+        sdk_path = subprocess.run(
+            ["xcrun", "--sdk", "iphoneos", "--show-sdk-path"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        build_env = os.environ.copy()
+        build_env["SDKROOT"] = sdk_path
+        build_env["BINDGEN_EXTRA_CLANG_ARGS"] = f"-isysroot {sdk_path}"
+
         run(
             [
                 "cargo",
@@ -576,7 +605,8 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
                 "--target",
                 "aarch64-apple-ios",
                 "--release",
-            ]
+            ],
+            env=build_env,
         )
         user_tool_src = os.path.join(
             darwinkit_root,
@@ -587,34 +617,90 @@ def build_ramdisk(restore_dir, im4m_path, vm_dir, input_dir, output_dir, temp_di
         os.makedirs(os.path.dirname(user_tool_dst), exist_ok=True)
         shutil.copy2(user_tool_src, user_tool_dst)
 
-        # Remove unnecessary files
-        for rel_path in RAMDISK_REMOVE:
-            full = os.path.join(mountpoint, rel_path)
-            if os.path.exists(full):
-                os.remove(full)
+        # Build and copy darwinkit_kernel_fuzzer to the ramdisk
+        print("  Building darwinkit_kernel_fuzzer for iOS...")
+        run(
+            [
+                "cargo",
+                "build",
+                "--manifest-path",
+                user_cargo_toml,
+                "--target",
+                "aarch64-apple-ios",
+                "--release",
+                "--no-default-features",
+                "--bin",
+                "darwinkit_kernel_fuzzer",
+            ],
+            env=build_env,
+        )
+        kfuzz_src = os.path.join(
+            darwinkit_root,
+            "ios/user/target/aarch64-apple-ios/release/darwinkit_kernel_fuzzer",
+        )
+        kfuzz_dst = os.path.join(mountpoint, "usr/local/bin/darwinkit_kernel_fuzzer")
+        print(f"  Copying {kfuzz_src} to {kfuzz_dst}...")
+        shutil.copy2(kfuzz_src, kfuzz_dst)
 
         # Re-sign Mach-O binaries
         print("  Re-signing Mach-O binaries...")
         signcert = os.path.join(input_dir, "signcert.p12")
 
-        for pattern in SIGN_DIRS:
-            for path in glob.glob(os.path.join(mountpoint, pattern)):
-                if os.path.isfile(path) and not os.path.islink(path):
-                    if (
-                        "Mach-O"
-                        in subprocess.run(
-                            ["file", path],
+        injected_files = [user_tool_dst, kfuzz_dst]
+        try:
+            import tarfile
+            with tarfile.open(ssh_tar, "r:gz") as tar:
+                for member in tar.getmembers():
+                    if member.isreg():
+                        injected_files.append(os.path.join(mountpoint, member.name))
+        except Exception as e:
+            print(f"  [!] Failed to read members of ssh.tar.gz: {e}")
+            for pattern in SIGN_DIRS:
+                for path in glob.glob(os.path.join(mountpoint, pattern)):
+                    if os.path.isfile(path) and not os.path.islink(path):
+                        injected_files.append(path)
+
+        sftp_ents = os.path.join(input_dir, "sftp_server_ents.plist")
+        user_tool_ents = os.path.join(input_dir, "darwinkit_user_tool_ents.plist")
+        kfuzz_ents = os.path.join(input_dir, "darwinkit_kernel_fuzzer_ents.plist")
+
+        for path in injected_files:
+            if os.path.exists(path) and not os.path.islink(path):
+                file_info = subprocess.run(
+                    ["file", path],
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                if "Mach-O" in file_info:
+                    # Dynamically linked libraries/shared libraries MUST NOT have entitlements
+                    if "shared library" in file_info or "dylib" in file_info or path.endswith(".dylib") or "usr/lib" in path:
+                        subprocess.run(
+                            [ldid_bin, "-S", f"-K{signcert}", path],
                             capture_output=True,
-                            text=True,
-                        ).stdout
-                    ):
+                        )
+                    # darwinkit_user_tool needs JIT/dynamic-codesigning entitlements
+                    # because frida-gum's static initializers allocate RWX memory
+                    elif path == user_tool_dst:
+                        ents_path = user_tool_ents if os.path.exists(user_tool_ents) else sftp_ents
+                        subprocess.run(
+                            [ldid_bin, f"-S{ents_path}", f"-K{signcert}", path],
+                            capture_output=True,
+                        )
+                    # darwinkit_kernel_fuzzer — no JIT needed, simpler entitlements
+                    elif path == kfuzz_dst:
+                        ents_path = kfuzz_ents if os.path.exists(kfuzz_ents) else sftp_ents
+                        subprocess.run(
+                            [ldid_bin, f"-S{ents_path}", f"-K{signcert}", path],
+                            capture_output=True,
+                        )
+                    # Other main executables preserve/merge their existing entitlements
+                    else:
                         subprocess.run(
                             [ldid_bin, "-S", "-M", f"-K{signcert}", path],
                             capture_output=True,
                         )
 
         # Fix sftp-server entitlements
-        sftp_ents = os.path.join(input_dir, "sftp_server_ents.plist")
         sftp_server = os.path.join(mountpoint, "usr/libexec/sftp-server")
         if os.path.exists(sftp_server):
             run([ldid_bin, f"-S{sftp_ents}", "-M", f"-K{signcert}", sftp_server])
@@ -827,7 +913,14 @@ def main():
         f.write(bytes(data))
     print(f"  source: {txm_src}")
     print(f"  format: IM4P, {len(data)} bytes")
-    run_swift_patch_component("txm", txm_src, txm_patched_raw)
+    
+    # Determine the TXM patch component based on variant mode
+    is_jb = os.environ.get("JB_MODE", "").strip() in ("1", "true", "yes", "TRUE", "YES")
+    is_dev = os.environ.get("DEV_MODE", "").strip() in ("1", "true", "yes", "TRUE", "YES")
+    txm_component = "txm-dev" if (is_jb or is_dev) else "txm"
+    
+    print(f"  patching using component: {txm_component}")
+    run_swift_patch_component(txm_component, txm_src, txm_patched_raw)
     with open(txm_patched_raw, "rb") as f:
         patched_txm = f.read()
     txm_im4p = os.path.join(temp_dir, "txm.im4p")

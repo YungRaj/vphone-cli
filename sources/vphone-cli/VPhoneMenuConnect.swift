@@ -95,11 +95,30 @@ extension VPhoneMenuController {
         Task {
             do {
                 let status = try await control.sendDevModeStatus()
-                showAlert(
-                    title: "Developer Mode",
-                    message: status.enabled ? "Developer Mode is enabled." : "Developer Mode is disabled.",
-                    style: .informational
-                )
+                if status.enabled {
+                    showAlert(
+                        title: "Developer Mode",
+                        message: "Developer Mode is enabled.",
+                        style: .informational
+                    )
+                } else {
+                    let alert = NSAlert()
+                    alert.messageText = "Developer Mode is Disabled"
+                    alert.informativeText = "Would you like to arm Developer Mode? This will require restarting the VM and choosing 'Turn On' when prompted on the screen."
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "Arm")
+                    alert.addButton(withTitle: "Cancel")
+                    
+                    let response = alert.runModal()
+                    if response == .alertFirstButtonReturn {
+                        let res = try await control.sendDevModeEnable()
+                        showAlert(
+                            title: "Developer Mode",
+                            message: "Developer Mode successfully armed! Please close this VM window and run 'make boot' again to activate it.",
+                            style: .informational
+                        )
+                    }
+                }
             } catch {
                 showAlert(title: "Developer Mode", message: "\(error)", style: .warning)
             }
